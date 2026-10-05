@@ -1,48 +1,31 @@
 # ⚽ SportAnalytics Pro
 
-Moteur d'analyse sportive pour Termux + Telegram.
+Moteur d'analyse statistique de matchs de football : modèle Poisson, historique SQLite, bot Telegram.
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+## Fonctionnalités
+
+- Récupération de vrais matchs (Football-Data.org)
+- Probabilités 1X2, Plus de 2,5 buts, BTTS
+- Scores exacts probables (top 3)
+- xG attendus par équipe
+- Confiance dynamique
+- Cache intelligent (fixtures 6h, équipes 12h)
+- Historique SQLite des prédictions
+- Suivi de performance (précision 1X2 / O2.5 / BTTS)
+- Export CSV
+- Value betting (comparaison avec cotes bookmaker)
+- Bot Telegram avec 7 commandes
+- Menu interactif
 
 ## Installation
 
 ```bash
 pkg update
 pkg install python git
+git clone https://github.com/Tchabio01/SportAnalytics.git
 cd SportAnalytics
 python -m pip install -r requirements.txt
 cp .env.example .env
-```
-
-Éditer `.env` et renseigner le token du bot Telegram.
-
-## Test local
-
-```bash
-python main.py --demo
-```
-
-Le mode `--demo` est volontairement identifié comme DEMO. Il ne représente pas des matchs réels.
-
-## Telegram
-
-```bash
-python main.py --telegram
-```
-
-Commandes :
-
-- `/start`
-- `/help`
-- `/today`
-- `/analyse`
-
-## Données réelles
-
-Le projet sépare volontairement le moteur d'analyse des fournisseurs de données. Avant d'utiliser des données réelles, renseigner une API sportive autorisée et implémenter son connecteur dans `sources/`.
-
-Ne pas scraper des sites en contournant leurs protections ou leurs conditions d'utilisation.
-
-## Sécurité
-
-- Ne jamais publier `.env`.
-- Ne jamais mettre le token Telegram dans Git.
-- Les prédictions sont statistiques et ne constituent pas des garanties.
