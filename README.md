@@ -5,6 +5,12 @@ Moteur d'analyse statistique de matchs de football : modèle Poisson, historique
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
+## 📸 Aperçu
+
+<p align="center">
+  <img src="docs/demo1.jpg" width="300" alt="Analyse Arsenal vs Leeds">
+  <img src="docs/demo2.jpg" width="300" alt="Analyse Charlton vs Bristol">
+</p>
 ## Fonctionnalités
 
 - Récupération de vrais matchs (Football-Data.org)
