@@ -1,9 +1,14 @@
-"""Sauvegarde des prédictions et suivi de performance (SQLite)."""
+"""Sauvegarde des prédictions dans SQLite pour suivi de performance."""
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "history.db"
+# Chemin configurable :
+#  - En local : history.db dans le projet
+#  - Sur Railway : /data/history.db (volume persistant)
+DB_PATH = Path(os.getenv("DB_PATH",
+                         str(Path(__file__).parent.parent / "history.db")))
 
 
 def _conn():
@@ -13,6 +18,7 @@ def _conn():
 
 
 def init():
+    """Crée la table si elle n'existe pas."""
     with _conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
@@ -43,6 +49,7 @@ def init():
 
 
 def save_prediction(match, analysis):
+    """Enregistre une prédiction. Ignore les doublons."""
     probs = analysis.get("probabilities", {})
     xgs = analysis.get("expected_goals", {})
     kickoff = match.get("kickoff", "") or ""
@@ -100,11 +107,15 @@ def update_result(pred_id, actual_home, actual_away):
             return
         r = dict(r)
 
-        # issue prédite (la plus probable)
-        probs = {"home": r["p_home"] or 0, "draw": r["p_draw"] or 0, "away": r["p_away"] or 0}
+        # Issue prédite (la plus probable)
+        probs = {
+            "home": r["p_home"] or 0,
+            "draw": r["p_draw"] or 0,
+            "away": r["p_away"] or 0,
+        }
         predicted = max(probs, key=probs.get)
 
-        # issue réelle
+        # Issue réelle
         if actual_home > actual_away:
             real = "home"
         elif actual_home < actual_away:
@@ -126,6 +137,7 @@ def update_result(pred_id, actual_home, actual_away):
 
 
 def stats():
+    """Stats globales sur les prédictions."""
     with _conn() as c:
         total = c.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
         with_result = c.execute(
@@ -153,6 +165,7 @@ def stats():
 
 
 def recent(n=10):
+    """N dernières prédictions."""
     with _conn() as c:
         rows = c.execute(
             "SELECT * FROM predictions ORDER BY id DESC LIMIT ?", (n,)
@@ -161,6 +174,7 @@ def recent(n=10):
 
 
 def pending_count():
+    """Nombre de prédictions dont le coup d'envoi est passé mais sans résultat."""
     with _conn() as c:
         return c.execute("""
             SELECT COUNT(*) FROM predictions
