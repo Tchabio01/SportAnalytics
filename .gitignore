@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+cache/
+cache.json
+history.db
+predictions_export.csv
+cron.log
+exit
+*.db
