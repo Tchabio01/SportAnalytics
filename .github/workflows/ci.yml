@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Vérifier les imports
+        env:
+          FOOTBALL_DATA_KEY: dummy
+          API_FOOTBALL_KEY: dummy
+          TELEGRAM_BOT_TOKEN: '0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        run: |
+          python -c "import main; print('main OK')"
+          python -c "from analysis.analyzer import analyse; print('analyzer OK')"
+          python -c "from reports.formatter import format_match; print('formatter OK')"
+          python -c "from data.history import init; init(); print('history OK')"
+      - name: Test mode démo
+        env:
+          FOOTBALL_DATA_KEY: dummy
+          API_FOOTBALL_KEY: dummy
+          TELEGRAM_BOT_TOKEN: '0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        run: python main.py --demo

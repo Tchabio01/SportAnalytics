@@ -4,6 +4,7 @@ Moteur d'analyse statistique de matchs de football : modèle Poisson, historique
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![CI](https://github.com/Tchabio01/SportAnalytics/actions/workflows/ci.yml/badge.svg)
 
 ## 📸 Aperçu
 
