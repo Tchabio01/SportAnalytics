@@ -1,9 +1,19 @@
-"""Connecteur football-data.org : matchs réels + recherche équipes locale."""
+"""Connecteur football-data.org : matchs réels + recherche équipes.
+
+Inclut :
+- Rate limiter (max 10 req/min, marge de sécurité)
+- Retry avec backoff exponentiel sur 429/500/502/503/504
+- Respect de l'en-tête Retry-After
+- Index local des équipes (l'API ignore le paramètre 'name' en gratuit)
+"""
 import os
 import json
 import time
+import threading
 import requests
 from pathlib import Path
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,13 +24,71 @@ CACHE_DIR = Path(__file__).parent.parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 CACHE_TTL = 6 * 3600
 
-# Compétitions du plan gratuit où l'on va chercher les équipes
+# Compétitions du plan gratuit pour l'index d'équipes
 COMPETITIONS = ["PL", "PD", "SA", "BL1", "FL1", "DED", "PPL", "ELC", "CL", "BSA"]
+
+
+# ---------- Rate limiter ----------
+
+class RateLimiter:
+    """Assure un délai minimum entre 2 appels (10 req/min → 6.5s de marge)."""
+    def __init__(self, min_interval=6.5):
+        self.min_interval = min_interval
+        self.last_call = 0
+        self._lock = threading.Lock()
+
+    def wait(self):
+        with self._lock:
+            elapsed = time.time() - self.last_call
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+            self.last_call = time.time()
+
+
+_limiter = RateLimiter(min_interval=6.5)
+
+
+# ---------- Session HTTP avec retry ----------
+
+def _build_session():
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1.5,             # 1.5s, 3s, 6s
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_session = _build_session()
 
 
 def _headers():
     return {"X-Auth-Token": API_KEY}
 
+
+def _get(path, params=None, timeout=20):
+    """GET avec rate limiting + retry."""
+    _limiter.wait()
+    r = _session.get(f"{BASE_URL}{path}", headers=_headers(),
+                     params=params, timeout=timeout)
+    if r.status_code == 429:
+        # Sécurité supplémentaire si l'en-tête Retry-After est absent
+        wait = int(r.headers.get("Retry-After", 30))
+        time.sleep(wait)
+        r = _session.get(f"{BASE_URL}{path}", headers=_headers(),
+                         params=params, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+# ---------- Cache disque ----------
 
 def _cached(key, ttl, fetcher):
     p = CACHE_DIR / f"fd_{key}.json"
@@ -35,19 +103,14 @@ def _cached(key, ttl, fetcher):
 
 def get_matches(date_str):
     def fetch():
-        r = requests.get(f"{BASE_URL}/matches", headers=_headers(),
-                         params={"date": date_str}, timeout=15)
-        r.raise_for_status()
-        return r.json()
+        return _get("/matches", params={"date": date_str})
     return _cached(f"matches_{date_str}", CACHE_TTL, fetch)
 
 
 def get_team_matches(team_id, limit=10):
     def fetch():
-        r = requests.get(f"{BASE_URL}/teams/{team_id}/matches", headers=_headers(),
-                         params={"status": "FINISHED", "limit": limit}, timeout=15)
-        r.raise_for_status()
-        return r.json()
+        return _get(f"/teams/{team_id}/matches",
+                    params={"status": "FINISHED", "limit": limit})
     return _cached(f"team_{team_id}_last{limit}", 12 * 3600, fetch)
 
 
@@ -108,7 +171,7 @@ def real_matches(date_str, limit=5, min_matches=2):
     return out
 
 
-# ---------- Index des équipes (local) ----------
+# ---------- Index local des équipes ----------
 
 def _all_teams():
     """Télécharge une fois toutes les équipes des grandes ligues (cache 7 jours)."""
@@ -116,13 +179,8 @@ def _all_teams():
         teams = {}
         for comp in COMPETITIONS:
             try:
-                r = requests.get(
-                    f"{BASE_URL}/competitions/{comp}/teams",
-                    headers=_headers(), timeout=15
-                )
-                if r.status_code != 200:
-                    continue
-                for t in r.json().get("teams", []):
+                data = _get(f"/competitions/{comp}/teams")
+                for t in data.get("teams", []):
                     tid = t.get("id")
                     name = t.get("name") or t.get("shortName") or ""
                     if tid and name:
@@ -133,7 +191,6 @@ def _all_teams():
                             "tla": t.get("tla", ""),
                             "competition": comp,
                         }
-                time.sleep(0.3)  # respect du rate limit
             except Exception:
                 continue
         return {"teams": list(teams.values())}
@@ -141,7 +198,6 @@ def _all_teams():
 
 
 def _similarity(query, name):
-    """Score de similarité (0-100)."""
     q = query.lower().strip()
     n = name.lower().strip()
     if q == n:
@@ -150,13 +206,11 @@ def _similarity(query, name):
         return 90
     if q in n:
         return 70
-    # Mots en commun
     q_words = set(q.split())
     n_words = set(n.split())
     common = q_words & n_words
     if common:
         return 50 + 10 * len(common)
-    # Match partiel mot à mot
     for qw in q_words:
         if len(qw) < 3:
             continue
@@ -167,12 +221,11 @@ def _similarity(query, name):
 
 
 def search_team(name):
-    """Cherche une équipe par nom dans l'index local (trié par pertinence)."""
+    """Cherche une équipe par nom dans l'index local."""
     data = _all_teams()
     teams = data.get("teams", [])
     scored = []
     for t in teams:
-        # Score basé sur le nom complet ET le nom court
         s1 = _similarity(name, t.get("name", ""))
         s2 = _similarity(name, t.get("shortName", "")) if t.get("shortName") else 0
         score = max(s1, s2)
@@ -183,7 +236,6 @@ def search_team(name):
 
 
 def team_form_summary(team_id, n=5):
-    """Résumé des N derniers matchs d'une équipe."""
     data = get_team_matches(team_id, limit=n)
     matches = [m for m in data.get("matches", [])
                if m.get("status") == "FINISHED"][:n]
