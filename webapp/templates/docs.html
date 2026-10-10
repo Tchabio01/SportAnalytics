@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SportAnalytics — API</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>🔌 API SportAnalytics</h1>
+        <p>Accès programmatique au moteur d'analyse</p>
+    </header>
+    <main>
+        <section>
+            <h2>Endpoints</h2>
+
+            <h3>GET /api/health</h3>
+            <p>Vérifie que le service répond.</p>
+            <pre>{"status": "ok", "service": "sportanalytics"}</pre>
+
+            <h3>GET /api/stats</h3>
+            <p>Statistiques globales du modèle.</p>
+            <pre>{"total": 42, "accuracy": 55.3, ...}</pre>
+
+            <h3>GET /api/predictions?n=10</h3>
+            <p>Dernières prédictions (max 100).</p>
+
+            <h3>GET /api/predict?home=Arsenal&away=Leeds</h3>
+            <p>Analyse statistique d'un match.</p>
+            <pre>{
+  "probabilities": {"home_win": 55.1, ...},
+  "expected_goals": {"home": 1.5, "away": 0.75},
+  "confidence": 65
+}</pre>
+
+            <h3>GET /api/h2h?home=Arsenal&away=Chelsea</h3>
+            <p>Confrontations directes.</p>
+        </section>
+        <p><a href="/">← Retour au dashboard</a></p>
+    </main>
+</body>
+</html>

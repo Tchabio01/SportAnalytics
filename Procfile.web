@@ -1,0 +1,1 @@
+web: python -c "from webapp.app import run; run()"

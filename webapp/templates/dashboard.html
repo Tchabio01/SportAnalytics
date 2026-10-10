@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SportAnalytics — Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>⚽ SportAnalytics</h1>
+        <p>Moteur d'analyse statistique</p>
+    </header>
+
+    <main>
+        <section class="stats">
+            <h2>📊 Statistiques</h2>
+            <div class="grid">
+                <div class="card">
+                    <div class="value">{{ stats.total }}</div>
+                    <div class="label">Prédictions</div>
+                </div>
+                <div class="card">
+                    <div class="value">{{ stats.with_result }}</div>
+                    <div class="label">Avec résultat</div>
+                </div>
+                <div class="card">
+                    <div class="value">{{ pending }}</div>
+                    <div class="label">En attente</div>
+                </div>
+            </div>
+
+            {% if stats.with_result %}
+            <div class="grid">
+                <div class="card accuracy">
+                    <div class="value">{{ stats.accuracy }}%</div>
+                    <div class="label">Précision 1X2</div>
+                </div>
+                <div class="card accuracy">
+                    <div class="value">{{ stats.over_accuracy }}%</div>
+                    <div class="label">Précision O2.5</div>
+                </div>
+                <div class="card accuracy">
+                    <div class="value">{{ stats.btts_accuracy }}%</div>
+                    <div class="label">Précision BTTS</div>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="predictions">
+            <h2>📋 Dernières prédictions</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Match</th>
+                        <th>1X2</th>
+                        <th>Confiance</th>
+                        <th>Résultat</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in recents %}
+                    <tr>
+                        <td>{{ r.date_created }}</td>
+                        <td>{{ r.home }} — {{ r.away }}</td>
+                        <td>{{ "%.0f"|format(r.p_home or 0) }}/{{ "%.0f"|format(r.p_draw or 0) }}/{{ "%.0f"|format(r.p_away or 0) }}</td>
+                        <td>{{ r.confidence }}/100</td>
+                        <td>
+                            {% if r.actual_home is not none %}
+                                {% if r.outcome_hit %}✅{% else %}❌{% endif %}
+                                {{ r.actual_home }}-{{ r.actual_away }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="api">
+            <h2>🔌 API REST</h2>
+            <p>Documentation complète : <a href="/api">/api</a></p>
+            <ul>
+                <li><code>GET /api/health</code> — Statut du service</li>
+                <li><code>GET /api/stats</code> — Statistiques du modèle</li>
+                <li><code>GET /api/predictions?n=10</code> — Dernières prédictions</li>
+                <li><code>GET /api/predict?home=Arsenal&away=Leeds</code> — Analyse d'un match</li>
+                <li><code>GET /api/h2h?home=Arsenal&away=Chelsea</code> — Confrontations</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>Mis à jour : {{ now }} · Analyse statistique uniquement</p>
+    </footer>
+</body>
+</html>
