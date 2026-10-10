@@ -1,4 +1,4 @@
-"""Connecteur football-data.org : matchs réels + recherche équipes."""
+"""Connecteur football-data.org : matchs réels + recherche équipes locale."""
 import os
 import json
 import time
@@ -14,6 +14,9 @@ CACHE_DIR = Path(__file__).parent.parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 CACHE_TTL = 6 * 3600
 
+# Compétitions du plan gratuit où l'on va chercher les équipes
+COMPETITIONS = ["PL", "PD", "SA", "BL1", "FL1", "DED", "PPL", "ELC", "CL", "BSA"]
+
 
 def _headers():
     return {"X-Auth-Token": API_KEY}
@@ -27,6 +30,8 @@ def _cached(key, ttl, fetcher):
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     return data
 
+
+# ---------- Matchs ----------
 
 def get_matches(date_str):
     def fetch():
@@ -77,7 +82,7 @@ def _compute_form(team_id, side, limit=10):
 
 def real_matches(date_str, limit=5, min_matches=2):
     data = get_matches(date_str)
-    out, skipped = [], []
+    out = []
     for m in data.get("matches", []):
         if len(out) >= limit:
             break
@@ -88,7 +93,6 @@ def real_matches(date_str, limit=5, min_matches=2):
             h_s, h_c, h_n = _compute_form(home["id"], "home")
             a_s, a_c, a_n = _compute_form(away["id"], "away")
             if h_n < min_matches or a_n < min_matches:
-                skipped.append(f"{home['name']} vs {away['name']}")
                 continue
             out.append({
                 "home": home["name"], "away": away["name"],
@@ -100,12 +104,44 @@ def real_matches(date_str, limit=5, min_matches=2):
                 "home_games_used": h_n, "away_games_used": a_n,
             })
         except Exception:
-            skipped.append(f"{home['name']} vs {away['name']}")
+            continue
     return out
 
 
+# ---------- Index des équipes (local) ----------
+
+def _all_teams():
+    """Télécharge une fois toutes les équipes des grandes ligues (cache 7 jours)."""
+    def fetch():
+        teams = {}
+        for comp in COMPETITIONS:
+            try:
+                r = requests.get(
+                    f"{BASE_URL}/competitions/{comp}/teams",
+                    headers=_headers(), timeout=15
+                )
+                if r.status_code != 200:
+                    continue
+                for t in r.json().get("teams", []):
+                    tid = t.get("id")
+                    name = t.get("name") or t.get("shortName") or ""
+                    if tid and name:
+                        teams[str(tid)] = {
+                            "id": tid,
+                            "name": name,
+                            "shortName": t.get("shortName", ""),
+                            "tla": t.get("tla", ""),
+                            "competition": comp,
+                        }
+                time.sleep(0.3)  # respect du rate limit
+            except Exception:
+                continue
+        return {"teams": list(teams.values())}
+    return _cached("all_teams", 7 * 24 * 3600, fetch)
+
+
 def _similarity(query, name):
-    """Score de similarité (0 à 100) entre une requête et un nom d'équipe."""
+    """Score de similarité (0-100)."""
     q = query.lower().strip()
     n = name.lower().strip()
     if q == n:
@@ -120,22 +156,30 @@ def _similarity(query, name):
     common = q_words & n_words
     if common:
         return 50 + 10 * len(common)
+    # Match partiel mot à mot
+    for qw in q_words:
+        if len(qw) < 3:
+            continue
+        for nw in n_words:
+            if qw == nw:
+                return 60
     return 0
 
 
 def search_team(name):
-    """Recherche une équipe par nom, triées par pertinence."""
-    def fetch():
-        r = requests.get(f"{BASE_URL}/teams", headers=_headers(),
-                         params={"name": name, "limit": 20}, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    data = _cached(f"search_{name.lower().replace(' ', '_')}", 24 * 3600, fetch)
+    """Cherche une équipe par nom dans l'index local (trié par pertinence)."""
+    data = _all_teams()
     teams = data.get("teams", [])
-
-    # Trier par similarité avec la requête
-    teams.sort(key=lambda t: _similarity(name, t.get("name", "")), reverse=True)
-    return teams
+    scored = []
+    for t in teams:
+        # Score basé sur le nom complet ET le nom court
+        s1 = _similarity(name, t.get("name", ""))
+        s2 = _similarity(name, t.get("shortName", "")) if t.get("shortName") else 0
+        score = max(s1, s2)
+        if score > 0:
+            scored.append((score, t))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [t for _, t in scored[:10]]
 
 
 def team_form_summary(team_id, n=5):
