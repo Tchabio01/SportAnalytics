@@ -63,9 +63,11 @@ def _compute_form(team_id, side, limit=10):
         if side == "away" and away_id != team_id:
             continue
         if home_id == team_id:
-            scored.append(h); conceded.append(a)
+            scored.append(h)
+            conceded.append(a)
         else:
-            scored.append(a); conceded.append(h)
+            scored.append(a)
+            conceded.append(h)
     if not scored:
         return 0.0, 0.0, 0
     return (round(sum(scored) / len(scored), 2),
@@ -79,7 +81,9 @@ def real_matches(date_str, limit=5, min_matches=2):
     for m in data.get("matches", []):
         if len(out) >= limit:
             break
-        home = m["homeTeam"]; away = m["awayTeam"]; league = m["competition"]
+        home = m["homeTeam"]
+        away = m["awayTeam"]
+        league = m["competition"]
         try:
             h_s, h_c, h_n = _compute_form(home["id"], "home")
             a_s, a_c, a_n = _compute_form(away["id"], "away")
@@ -100,17 +104,42 @@ def real_matches(date_str, limit=5, min_matches=2):
     return out
 
 
+def _similarity(query, name):
+    """Score de similarité (0 à 100) entre une requête et un nom d'équipe."""
+    q = query.lower().strip()
+    n = name.lower().strip()
+    if q == n:
+        return 100
+    if n.startswith(q):
+        return 90
+    if q in n:
+        return 70
+    # Mots en commun
+    q_words = set(q.split())
+    n_words = set(n.split())
+    common = q_words & n_words
+    if common:
+        return 50 + 10 * len(common)
+    return 0
+
+
 def search_team(name):
+    """Recherche une équipe par nom, triées par pertinence."""
     def fetch():
         r = requests.get(f"{BASE_URL}/teams", headers=_headers(),
-                         params={"name": name, "limit": 10}, timeout=15)
+                         params={"name": name, "limit": 20}, timeout=15)
         r.raise_for_status()
         return r.json()
     data = _cached(f"search_{name.lower().replace(' ', '_')}", 24 * 3600, fetch)
-    return data.get("teams", [])
+    teams = data.get("teams", [])
+
+    # Trier par similarité avec la requête
+    teams.sort(key=lambda t: _similarity(name, t.get("name", "")), reverse=True)
+    return teams
 
 
 def team_form_summary(team_id, n=5):
+    """Résumé des N derniers matchs d'une équipe."""
     data = get_team_matches(team_id, limit=n)
     matches = [m for m in data.get("matches", [])
                if m.get("status") == "FINISHED"][:n]
