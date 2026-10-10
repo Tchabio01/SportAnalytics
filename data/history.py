@@ -1,4 +1,4 @@
-"""Sauvegarde des prédictions et watchlist (SQLite)."""
+"""Sauvegarde des prédictions, watchlist et abonnés (SQLite)."""
 import os
 import sqlite3
 from datetime import datetime
@@ -34,13 +34,19 @@ def init():
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_kickoff ON predictions(kickoff)")
-
         c.execute("""
             CREATE TABLE IF NOT EXISTS watchlist (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 team_id INTEGER UNIQUE,
                 team_name TEXT NOT NULL,
                 added_at TEXT NOT NULL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS subscribers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER UNIQUE,
+                subscribed_at TEXT NOT NULL
             )
         """)
         c.commit()
@@ -57,7 +63,6 @@ def save_prediction(match, analysis):
         ).fetchone()
         if existing:
             return existing["id"]
-
         cur = c.execute("""
             INSERT INTO predictions
             (date_created, kickoff, competition, home, away,
@@ -128,11 +133,8 @@ def stats():
         over_hits = c.execute("SELECT COUNT(*) FROM predictions WHERE over_hit=1").fetchone()[0]
         btts_hits = c.execute("SELECT COUNT(*) FROM predictions WHERE btts_hit=1").fetchone()[0]
         return {
-            "total": total,
-            "with_result": with_result,
-            "hits": hits,
-            "over_hits": over_hits,
-            "btts_hits": btts_hits,
+            "total": total, "with_result": with_result,
+            "hits": hits, "over_hits": over_hits, "btts_hits": btts_hits,
             "accuracy": round(hits / with_result * 100, 1) if with_result else 0.0,
             "over_accuracy": round(over_hits / with_result * 100, 1) if with_result else 0.0,
             "btts_accuracy": round(btts_hits / with_result * 100, 1) if with_result else 0.0,
@@ -154,6 +156,7 @@ def pending_count():
             WHERE actual_home IS NULL AND kickoff != ''
               AND kickoff < datetime('now')
         """).fetchone()[0]
+
 
 
 def watchlist_add(team_id, team_name):
@@ -187,3 +190,36 @@ def watchlist_names_lower():
     with _conn() as c:
         rows = c.execute("SELECT team_name FROM watchlist").fetchall()
         return {r["team_name"].lower() for r in rows}
+
+
+def subscribe(chat_id):
+    with _conn() as c:
+        try:
+            c.execute("""
+                INSERT INTO subscribers (chat_id, subscribed_at)
+                VALUES (?, ?)
+            """, (chat_id, datetime.now().isoformat(timespec="seconds")))
+            c.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def unsubscribe(chat_id):
+    with _conn() as c:
+        cur = c.execute("DELETE FROM subscribers WHERE chat_id=?", (chat_id,))
+        c.commit()
+        return cur.rowcount > 0
+
+
+def is_subscribed(chat_id):
+    with _conn() as c:
+        r = c.execute("SELECT 1 FROM subscribers WHERE chat_id=?",
+                      (chat_id,)).fetchone()
+        return r is not None
+
+
+def subscribers_list():
+    with _conn() as c:
+        rows = c.execute("SELECT chat_id FROM subscribers").fetchall()
+        return [r["chat_id"] for r in rows]
