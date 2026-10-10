@@ -7,6 +7,9 @@ from pathlib import Path
 DB_PATH = Path(os.getenv("DB_PATH",
                          str(Path(__file__).parent.parent / "history.db")))
 
+# Créer le dossier parent si besoin (utile sur Railway)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
 
 def _conn():
     c = sqlite3.connect(DB_PATH)
