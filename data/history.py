@@ -92,7 +92,7 @@ def pending_results():
     with _conn() as c:
         rows = c.execute("""
             SELECT * FROM predictions
-            WHERE actual_home IS NULL AND kickoff != '' AND kickoff < ?
+            WHERE actual_home IS NULL AND kickoff != '' AND datetime(kickoff) < datetime(?)
             ORDER BY kickoff ASC
         """, (now,)).fetchall()
         return [dict(r) for r in rows]
@@ -157,7 +157,7 @@ def pending_count():
         return c.execute("""
             SELECT COUNT(*) FROM predictions
             WHERE actual_home IS NULL AND kickoff != ''
-              AND kickoff < datetime('now')
+              AND datetime(kickoff) < datetime('now')
         """).fetchone()[0]
 
 
