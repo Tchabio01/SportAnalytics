@@ -1,12 +1,9 @@
-"""Sauvegarde des prédictions dans SQLite pour suivi de performance."""
+"""Sauvegarde des prédictions et watchlist (SQLite)."""
 import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-# Chemin configurable :
-#  - En local : history.db dans le projet
-#  - Sur Railway : /data/history.db (volume persistant)
 DB_PATH = Path(os.getenv("DB_PATH",
                          str(Path(__file__).parent.parent / "history.db")))
 
@@ -18,7 +15,6 @@ def _conn():
 
 
 def init():
-    """Crée la table si elle n'existe pas."""
     with _conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
@@ -28,28 +24,29 @@ def init():
                 competition TEXT,
                 home TEXT NOT NULL,
                 away TEXT NOT NULL,
-                p_home REAL,
-                p_draw REAL,
-                p_away REAL,
-                over_25 REAL,
-                btts REAL,
-                xg_home REAL,
-                xg_away REAL,
+                p_home REAL, p_draw REAL, p_away REAL,
+                over_25 REAL, btts REAL,
+                xg_home REAL, xg_away REAL,
                 confidence INTEGER,
-                actual_home INTEGER,
-                actual_away INTEGER,
-                outcome_hit INTEGER,
-                over_hit INTEGER,
-                btts_hit INTEGER,
+                actual_home INTEGER, actual_away INTEGER,
+                outcome_hit INTEGER, over_hit INTEGER, btts_hit INTEGER,
                 created_at TEXT NOT NULL
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_kickoff ON predictions(kickoff)")
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER UNIQUE,
+                team_name TEXT NOT NULL,
+                added_at TEXT NOT NULL
+            )
+        """)
         c.commit()
 
 
 def save_prediction(match, analysis):
-    """Enregistre une prédiction. Ignore les doublons."""
     probs = analysis.get("probabilities", {})
     xgs = analysis.get("expected_goals", {})
     kickoff = match.get("kickoff", "") or ""
@@ -71,15 +68,10 @@ def save_prediction(match, analysis):
             datetime.now().strftime("%Y-%m-%d"),
             kickoff,
             match.get("competition") or match.get("league", ""),
-            match["home"],
-            match["away"],
-            probs.get("home_win"),
-            probs.get("draw"),
-            probs.get("away_win"),
-            probs.get("over_2_5"),
-            probs.get("btts_yes"),
-            xgs.get("home"),
-            xgs.get("away"),
+            match["home"], match["away"],
+            probs.get("home_win"), probs.get("draw"), probs.get("away_win"),
+            probs.get("over_2_5"), probs.get("btts_yes"),
+            xgs.get("home"), xgs.get("away"),
             analysis.get("confidence"),
             datetime.now().isoformat(timespec="seconds"),
         ))
@@ -88,7 +80,6 @@ def save_prediction(match, analysis):
 
 
 def pending_results():
-    """Prédictions dont le coup d'envoi est passé mais sans résultat."""
     now = datetime.now().isoformat(timespec="seconds")
     with _conn() as c:
         rows = c.execute("""
@@ -100,34 +91,25 @@ def pending_results():
 
 
 def update_result(pred_id, actual_home, actual_away):
-    """Remplit le résultat d'une prédiction et calcule les hits."""
     with _conn() as c:
         r = c.execute("SELECT * FROM predictions WHERE id=?", (pred_id,)).fetchone()
         if not r:
             return
         r = dict(r)
-
-        # Issue prédite (la plus probable)
-        probs = {
-            "home": r["p_home"] or 0,
-            "draw": r["p_draw"] or 0,
-            "away": r["p_away"] or 0,
-        }
+        probs = {"home": r["p_home"] or 0,
+                 "draw": r["p_draw"] or 0,
+                 "away": r["p_away"] or 0}
         predicted = max(probs, key=probs.get)
-
-        # Issue réelle
         if actual_home > actual_away:
             real = "home"
         elif actual_home < actual_away:
             real = "away"
         else:
             real = "draw"
-
         outcome_hit = 1 if predicted == real else 0
         total_goals = actual_home + actual_away
         over_hit = 1 if (total_goals >= 3) == ((r["over_25"] or 0) > 50) else 0
         btts_hit = 1 if (actual_home >= 1 and actual_away >= 1) == ((r["btts"] or 0) > 50) else 0
-
         c.execute("""
             UPDATE predictions
             SET actual_home=?, actual_away=?, outcome_hit=?, over_hit=?, btts_hit=?
@@ -137,21 +119,14 @@ def update_result(pred_id, actual_home, actual_away):
 
 
 def stats():
-    """Stats globales sur les prédictions."""
     with _conn() as c:
         total = c.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
         with_result = c.execute(
             "SELECT COUNT(*) FROM predictions WHERE actual_home IS NOT NULL"
         ).fetchone()[0]
-        hits = c.execute(
-            "SELECT COUNT(*) FROM predictions WHERE outcome_hit=1"
-        ).fetchone()[0]
-        over_hits = c.execute(
-            "SELECT COUNT(*) FROM predictions WHERE over_hit=1"
-        ).fetchone()[0]
-        btts_hits = c.execute(
-            "SELECT COUNT(*) FROM predictions WHERE btts_hit=1"
-        ).fetchone()[0]
+        hits = c.execute("SELECT COUNT(*) FROM predictions WHERE outcome_hit=1").fetchone()[0]
+        over_hits = c.execute("SELECT COUNT(*) FROM predictions WHERE over_hit=1").fetchone()[0]
+        btts_hits = c.execute("SELECT COUNT(*) FROM predictions WHERE btts_hit=1").fetchone()[0]
         return {
             "total": total,
             "with_result": with_result,
@@ -165,7 +140,6 @@ def stats():
 
 
 def recent(n=10):
-    """N dernières prédictions."""
     with _conn() as c:
         rows = c.execute(
             "SELECT * FROM predictions ORDER BY id DESC LIMIT ?", (n,)
@@ -174,10 +148,42 @@ def recent(n=10):
 
 
 def pending_count():
-    """Nombre de prédictions dont le coup d'envoi est passé mais sans résultat."""
     with _conn() as c:
         return c.execute("""
             SELECT COUNT(*) FROM predictions
             WHERE actual_home IS NULL AND kickoff != ''
               AND kickoff < datetime('now')
         """).fetchone()[0]
+
+
+def watchlist_add(team_id, team_name):
+    with _conn() as c:
+        try:
+            c.execute("""
+                INSERT INTO watchlist (team_id, team_name, added_at)
+                VALUES (?, ?, ?)
+            """, (team_id, team_name, datetime.now().isoformat(timespec="seconds")))
+            c.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def watchlist_remove(team_name):
+    with _conn() as c:
+        cur = c.execute("DELETE FROM watchlist WHERE LOWER(team_name) = LOWER(?)",
+                        (team_name,))
+        c.commit()
+        return cur.rowcount > 0
+
+
+def watchlist_list():
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM watchlist ORDER BY team_name").fetchall()
+        return [dict(r) for r in rows]
+
+
+def watchlist_names_lower():
+    with _conn() as c:
+        rows = c.execute("SELECT team_name FROM watchlist").fetchall()
+        return {r["team_name"].lower() for r in rows}

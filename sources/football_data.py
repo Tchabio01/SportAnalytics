@@ -1,6 +1,4 @@
-"""Connecteur football-data.org : matchs réels + forme récente.
-Plan gratuit : 10 req/min, grands championnats européens uniquement.
-"""
+"""Connecteur football-data.org : matchs réels + recherche équipes."""
 import os
 import json
 import time
@@ -31,7 +29,6 @@ def _cached(key, ttl, fetcher):
 
 
 def get_matches(date_str):
-    """Matchs d'une date (AAAA-MM-JJ)."""
     def fetch():
         r = requests.get(f"{BASE_URL}/matches", headers=_headers(),
                          params={"date": date_str}, timeout=15)
@@ -41,7 +38,6 @@ def get_matches(date_str):
 
 
 def get_team_matches(team_id, limit=10):
-    """N derniers matchs terminés d'une équipe."""
     def fetch():
         r = requests.get(f"{BASE_URL}/teams/{team_id}/matches", headers=_headers(),
                          params={"status": "FINISHED", "limit": limit}, timeout=15)
@@ -51,13 +47,8 @@ def get_team_matches(team_id, limit=10):
 
 
 def _compute_form(team_id, side, limit=10):
-    """
-    Retourne (moy_buts_pour, moy_buts_contre, nb_matchs) sur les N derniers
-    matchs à domicile (side='home') ou extérieur (side='away').
-    """
     data = get_team_matches(team_id, limit=limit * 2)
     scored, conceded = [], []
-
     for m in data.get("matches", []):
         if m.get("status") != "FINISHED":
             continue
@@ -65,20 +56,16 @@ def _compute_form(team_id, side, limit=10):
         h, a = ft.get("home"), ft.get("away")
         if h is None or a is None:
             continue
-
         home_id = m["homeTeam"]["id"]
         away_id = m["awayTeam"]["id"]
-
         if side == "home" and home_id != team_id:
             continue
         if side == "away" and away_id != team_id:
             continue
-
         if home_id == team_id:
             scored.append(h); conceded.append(a)
         else:
             scored.append(a); conceded.append(h)
-
     if not scored:
         return 0.0, 0.0, 0
     return (round(sum(scored) / len(scored), 2),
@@ -87,52 +74,67 @@ def _compute_form(team_id, side, limit=10):
 
 
 def real_matches(date_str, limit=5, min_matches=2):
-    """
-    Retourne des matchs au format compatible avec analyze() / format_match().
-    Fournit à la fois 'league' et 'competition' pour compatibilité.
-    """
     data = get_matches(date_str)
     out, skipped = [], []
-
     for m in data.get("matches", []):
         if len(out) >= limit:
             break
-
-        home = m["homeTeam"]
-        away = m["awayTeam"]
-        league = m["competition"]
-
+        home = m["homeTeam"]; away = m["awayTeam"]; league = m["competition"]
         try:
             h_s, h_c, h_n = _compute_form(home["id"], "home")
             a_s, a_c, a_n = _compute_form(away["id"], "away")
-
             if h_n < min_matches or a_n < min_matches:
-                skipped.append(f"{home['name']} vs {away['name']} (historique {h_n}/{a_n})")
+                skipped.append(f"{home['name']} vs {away['name']}")
                 continue
-
             out.append({
-                "home": home["name"],
-                "away": away["name"],
-                "home_scored": h_s,
-                "home_conceded": h_c,
-                "away_scored": a_s,
-                "away_conceded": a_c,
-                "kickoff": m["utcDate"],
-                "date": m["utcDate"],
-                "league": league["name"],
-                "competition": league["name"],
+                "home": home["name"], "away": away["name"],
+                "home_scored": h_s, "home_conceded": h_c,
+                "away_scored": a_s, "away_conceded": a_c,
+                "kickoff": m["utcDate"], "date": m["utcDate"],
+                "league": league["name"], "competition": league["name"],
                 "country": (league.get("area") or {}).get("name", ""),
-                "home_games_used": h_n,
-                "away_games_used": a_n,
+                "home_games_used": h_n, "away_games_used": a_n,
             })
-        except Exception as e:
-            skipped.append(f"{home['name']} vs {away['name']} -> {e}")
+        except Exception:
+            skipped.append(f"{home['name']} vs {away['name']}")
+    return out
 
-    if skipped:
-        print(f"[football-data] {len(skipped)} match(s) ignoré(s) :")
-        for s in skipped[:5]:
-            print(f"  - {s}")
-        if len(skipped) > 5:
-            print(f"  ... et {len(skipped) - 5} autres")
 
+def search_team(name):
+    def fetch():
+        r = requests.get(f"{BASE_URL}/teams", headers=_headers(),
+                         params={"name": name, "limit": 10}, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    data = _cached(f"search_{name.lower().replace(' ', '_')}", 24 * 3600, fetch)
+    return data.get("teams", [])
+
+
+def team_form_summary(team_id, n=5):
+    data = get_team_matches(team_id, limit=n)
+    matches = [m for m in data.get("matches", [])
+               if m.get("status") == "FINISHED"][:n]
+    out = []
+    for m in matches:
+        ft = m.get("score", {}).get("fullTime", {})
+        if ft.get("home") is None:
+            continue
+        is_home = m["homeTeam"]["id"] == team_id
+        gf = ft["home"] if is_home else ft["away"]
+        ga = ft["away"] if is_home else ft["home"]
+        opp = m["awayTeam"]["name"] if is_home else m["homeTeam"]["name"]
+        if gf > ga:
+            res = "V"
+        elif gf < ga:
+            res = "D"
+        else:
+            res = "N"
+        out.append({
+            "date": m["utcDate"][:10],
+            "result": res,
+            "gf": gf, "ga": ga,
+            "opponent": opp,
+            "home": is_home,
+            "competition": m["competition"]["name"],
+        })
     return out
