@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from analysis.analyzer import analyse
 from reports.formatter import format_match
 from telegram.nlp import parse_match_query, match_team
+from data.history import save_prediction
 
 load_dotenv()
 
@@ -74,6 +75,7 @@ def _send_matches(chat_id, date_str, limit=3):
                         m["away_scored"], m["away_conceded"],
                         home_games=m.get("home_games_used", 0),
                         away_games=m.get("away_games_used", 0))
+            save_prediction(m, a)
             bot.send_message(chat_id, format_match(m, a))
     except Exception as e:
         bot.send_message(chat_id, f"❌ Erreur : {e}")
