@@ -63,7 +63,6 @@ def main():
         a = analyse(m["home"], m["away"],
                     m["home_scored"], m["home_conceded"],
                     m["away_scored"], m["away_conceded"])
-        save_prediction(m, a)
         print(format_match(m, a))
         return
 
